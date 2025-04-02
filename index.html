@@ -35,13 +35,11 @@
             left: 0;
             width: 100%; /* Static width */
             height: 100%;
-            /* URL for the background image */
             background-image: url('https://wallpaperaccess.com/full/3480667.jpg');
             background-repeat: no-repeat; /* No repeat for static */
             background-size: cover; /* Cover the container */
             background-position: center center; /* Center the image */
             z-index: 0;
-            /* No animation */
         }
 
         /* Clippy Character */
@@ -66,9 +64,7 @@
             grid-template-rows: 1fr 1fr;
             border: 1px solid #555; /* Optional border for the container */
         }
-        .obstacle-tile {
-             /* Basic tile style, colors set below */
-        }
+        .obstacle-tile { }
         .obstacle-tile-red { background-color: #F25022; }
         .obstacle-tile-green { background-color: #7FBA00; }
         .obstacle-tile-blue { background-color: #00A4EF; }
@@ -189,413 +185,343 @@
         const messageOverlay = document.getElementById('message-overlay');
 
         // --- Game Constants ---
-        const GRAVITY = 0.6; // Downward acceleration per frame
-        const JUMP_FORCE = -12; // Initial upward velocity on jump
-        const GROUND_Y = 50; // Y position (from bottom) of the ground
-        const GAME_WIDTH = gameContainer.offsetWidth; // Width of the game area
-        const GAME_HEIGHT = gameContainer.offsetHeight; // Height of the game area
-        const SCROLL_SPEED = 3.5; // Speed obstacles/letters move left (pixels per frame)
-        const OBSTACLE_SPAWN_INTERVAL = 120; // Spawn obstacle every X frames
-        const LETTER_SPAWN_INTERVAL = 100; // Attempt to spawn letter every Y frames
-        const TARGET_WORD = "THRIVING"; // The word to collect
-        const CLIPPY_WIDTH = 30; // Clippy's width for collision detection
-        const CLIPPY_HEIGHT = 50; // Clippy's height for collision detection
-        const CLIPPY_X_POS = 100; // Clippy's fixed horizontal position (from left)
-        const LETTER_MIN_Y = 70; // Min height letters spawn from bottom
-        const LETTER_MAX_Y = 220; // Max height letters spawn from bottom
-        const MIN_SPAWN_GAP = 180; // Min horizontal pixels between newly spawned items
+        const GRAVITY = 0.6;
+        const JUMP_FORCE = -12;
+        const GROUND_Y = 50;
+        const GAME_WIDTH = gameContainer.offsetWidth;
+        const GAME_HEIGHT = gameContainer.offsetHeight;
+        const SCROLL_SPEED = 3.5;
+        // --- Obstacle Spawning Timing ---
+        const MIN_OBSTACLE_INTERVAL = 90; // Minimum frames between obstacles
+        const MAX_OBSTACLE_INTERVAL = 200; // Maximum frames between obstacles
+        // --- Letter Spawning Timing ---
+        const LETTER_SPAWN_INTERVAL = 100; // Attempt spawn check every X frames
+        const TARGET_WORD = "THRIVING";
+        const CLIPPY_WIDTH = 30;
+        const CLIPPY_HEIGHT = 50;
+        const CLIPPY_X_POS = 100;
+        const LETTER_MIN_Y = 70;
+        const LETTER_MAX_Y = 220;
+        const MIN_SPAWN_GAP = 180; // Min horizontal pixels between any spawned items
 
         // --- Game State Variables ---
-        let clippyY = GROUND_Y; // Clippy's current vertical position (from bottom)
-        let clippyVY = 0; // Clippy's current vertical velocity
-        let onPlatform = false; // Is Clippy currently on the ground or an obstacle?
-        let obstacles = []; // Array to hold active obstacle data objects
-        let letters = []; // Array to hold active letter data objects
-        let frameCount = 0; // Frame counter for timing spawns
-        let collectedString = ""; // String of letters collected so far
-        let nextLetterIndex = 0; // Index of the next letter needed from TARGET_WORD
-        let gameActive = false; // Is the game currently running?
-        let animationFrameId = null; // ID for canceling the game loop (requestAnimationFrame)
-        let audioStarted = false; // Has the audio context been started by user interaction?
+        let clippyY = GROUND_Y;
+        let clippyVY = 0;
+        let onPlatform = false;
+        let obstacles = [];
+        let letters = [];
+        let frameCount = 0;
+        let collectedString = "";
+        let nextLetterIndex = 0;
+        let nextObstacleSpawnFrame = 0; // Frame number when the next obstacle should spawn
+        let gameActive = false;
+        let animationFrameId = null;
+        let audioStarted = false;
 
         // --- Sound Setup (Tone.js) ---
-        let synth; // Synth object for sound effects
+        let synth;
         try {
-            // Initialize a simple synth
             synth = new Tone.Synth({
                 oscillator: { type: 'sine' },
                 envelope: {
-                    attack: 0.01, // Quick attack
-                    decay: 0.1,
-                    sustain: 0.1,
-                    release: 0.2 // Quick release
+                    attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.2
                 }
-            }).toDestination(); // Connect synth to audio output
-        } catch (e) {
-            console.error("Tone.js synth could not be created:", e);
-            synth = null; // Set synth to null if creation fails
-        }
+            }).toDestination();
+        } catch (e) { console.error("Tone.js synth could not be created:", e); synth = null; }
 
 
         // --- Game Functions ---
 
-        /**
-         * Starts the Tone.js audio context if not already running.
-         * Required by browsers to play audio initiated by code. Needs user interaction.
-         */
         async function startAudio() {
-            // Check if audio context exists and is not already running
             if (!audioStarted && Tone.context.state !== 'running') {
                 try {
-                    await Tone.start(); // Request audio context start (returns a Promise)
+                    await Tone.start();
                     console.log("Audio context started!");
-                    audioStarted = true; // Mark audio as ready
-                } catch (e) {
-                    // Log error if starting audio context fails
-                    console.error("Tone.start() failed:", e);
-                }
+                    audioStarted = true;
+                } catch (e) { console.error("Tone.start() failed:", e); }
             }
         }
 
-        /**
-         * Plays a short "plop" sound effect using the synth.
-         */
         function playPlopSound() {
-            // Check if synth object exists and audio context has been started
             if (synth && audioStarted) {
-                try {
-                    // Trigger a short, low-pitched note (G3) for a 16th note duration
-                    synth.triggerAttackRelease("G3", "16n", Tone.now());
-                } catch (e) {
-                    // Log error if playing sound fails
-                    console.error("Error playing sound:", e);
-                }
+                try { synth.triggerAttackRelease("G3", "16n", Tone.now()); }
+                catch (e) { console.error("Error playing sound:", e); }
             }
         }
 
         /**
-         * Resets all game variables, clears existing elements, and prepares for a new game.
+         * Calculates the frame number for the next obstacle spawn using a random interval.
          */
+        function setNextObstacleSpawnTime() {
+            const interval = Math.floor(Math.random() * (MAX_OBSTACLE_INTERVAL - MIN_OBSTACLE_INTERVAL + 1)) + MIN_OBSTACLE_INTERVAL;
+            nextObstacleSpawnFrame = frameCount + interval;
+            // console.log(`Next obstacle spawn scheduled for frame: ${nextObstacleSpawnFrame} (in ${interval} frames)`);
+        }
+
+
         function resetGame() {
             console.log("Resetting game...");
-            // Reset player position and physics state
             clippyY = GROUND_Y;
             clippyVY = 0;
-            clippy.style.bottom = `${clippyY}px`; // Update visual position
-            onPlatform = true; // Start on the ground platform
+            clippy.style.bottom = `${clippyY}px`;
+            onPlatform = true;
 
-            // Remove existing obstacle and letter DOM elements and clear arrays
             obstacles.forEach(obs => obs.element.remove());
             obstacles = [];
             letters.forEach(let => let.element.remove());
             letters = [];
 
-            // Reset counters and game state
             frameCount = 0;
             collectedString = "";
             nextLetterIndex = 0;
-            uiCollected.textContent = ""; // Clear collected letters UI
-            uiNextLetter.textContent = TARGET_WORD[0]; // Show the first letter needed
-            gameActive = true; // Set game state to active
-            messageOverlay.style.display = 'none'; // Hide the start/game over overlay
+            setNextObstacleSpawnTime(); // Set initial obstacle spawn time
+            uiCollected.textContent = "";
+            uiNextLetter.textContent = TARGET_WORD[0];
+            gameActive = true;
+            messageOverlay.style.display = 'none';
 
-            // Start the game loop if it's not already running
             if (!animationFrameId) {
                 console.log("Starting game loop from reset.");
                 gameLoop();
             }
         }
 
-        /**
-         * Starts the game, ensuring audio is ready first. Calls resetGame if needed.
-         */
         async function startGame() {
-            await startAudio(); // Make sure audio context is started
-            if (!gameActive) { // Only reset if the game isn't already active
+            await startAudio();
+            if (!gameActive) {
                  resetGame();
             }
         }
 
-        /**
-         * Ends the current game session, stops the game loop, and displays the game over message.
-         * @param {string} [reason="hit an obstacle"] - Text description of why the game ended.
-         */
         function gameOver(reason = "hit an obstacle") {
-            if (!gameActive) return; // Prevent multiple game over calls
+            if (!gameActive) return;
             console.log("Game Over!", reason);
-            gameActive = false; // Set game state to inactive
-            cancelAnimationFrame(animationFrameId); // Stop the game loop
-            animationFrameId = null; // Clear the loop ID
+            gameActive = false;
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
 
-            // Display the game over message overlay with the reason and collected letters
             messageOverlay.innerHTML = `
                 <h2>Game Over!</h2>
                 <p>(${reason})</p>
                 <p>You collected: ${collectedString}</p>
                 <p>Click or press Spacebar to Play Again</p>
             `;
-            messageOverlay.style.display = 'flex'; // Show the overlay
+            messageOverlay.style.display = 'flex';
         }
 
         /**
-         * Applies gravity to Clippy, checks for landing on the ground or obstacle platforms,
-         * and updates Clippy's vertical position (clippyY) and state (onPlatform).
+         * Applies gravity and handles landing/snapping to ground or platforms.
+         * More robust landing check using previous position.
          */
         function applyGravityAndPlatformCheck() {
-            if (!gameActive) return; // Don't run physics if game is not active
+            if (!gameActive) return;
 
-            let onAnyPlatformThisFrame = false; // Assume not landing on anything initially
-            let potentialPlatformY = GROUND_Y; // Default landing Y is the ground
+            const prevClippyY = clippyY; // Store position before applying velocity
+            let landedOnPlatform = false;
+            let platformTopY = GROUND_Y; // Default to ground
 
-            // Only check for platform landing if Clippy is falling or stationary (VY >= 0)
+            // Apply gravity
+            clippyVY += GRAVITY;
+            clippyY -= clippyVY;
+
+            // Check for platform landing ONLY if moving downwards (or stationary)
             if (clippyVY >= 0) {
-                // Iterate through current obstacles to check for potential landing
                 for (const obs of obstacles) {
-                    const obsTopY = obs.y + obs.height; // Y coordinate of the obstacle's top edge
-                    // Check if Clippy is horizontally overlapping with the obstacle (with buffer)
+                    const obsTopSurfaceY = obs.y + obs.height;
                     const isHorizontallyAligned =
                         CLIPPY_X_POS < obs.x + obs.width - 5 &&
                         CLIPPY_X_POS + CLIPPY_WIDTH > obs.x + 5;
 
-                    // Check if Clippy's bottom edge is vertically positioned to land on this obstacle
-                    if (isHorizontallyAligned &&
-                        clippyY >= obsTopY - 10 && // Clippy bottom is near or slightly above the top
-                        clippyY <= obsTopY + clippyVY + 5) // Clippy bottom will land on or pass top in this frame
-                        {
-                        onAnyPlatformThisFrame = true; // Flag that a landing will occur
-                        potentialPlatformY = obsTopY; // Set the landing Y to this obstacle's top
-                        break; // Found a platform to land on, no need to check others
+                    // Check if Clippy crossed the platform's top surface this frame
+                    if (isHorizontallyAligned && prevClippyY >= obsTopSurfaceY && clippyY <= obsTopSurfaceY) {
+                        landedOnPlatform = true;
+                        platformTopY = obsTopSurfaceY; // Land on this platform
+                        break; // Landed, no need to check others
                     }
                 }
             }
 
-            // Update Clippy's state based on whether a landing occurred
-            if (onAnyPlatformThisFrame) {
-                 // Landed on an obstacle platform
-                 clippyY = potentialPlatformY; // Snap vertical position to platform top
-                 clippyVY = 0; // Stop vertical movement
-                 onPlatform = true; // Clippy is now considered on a platform
+            // Handle landing or ground collision
+            if (landedOnPlatform) {
+                clippyY = platformTopY; // Snap to platform top
+                clippyVY = 0;
+                onPlatform = true;
             } else {
-                 // Not landing on an obstacle, apply gravity
-                 clippyVY += GRAVITY; // Increase downward velocity
-                 clippyY -= clippyVY; // Update vertical position
-                 onPlatform = false; // Clippy is now considered in the air
-
-                 // Check for ground collision *after* applying gravity
-                 if (clippyY <= GROUND_Y) {
-                     clippyY = GROUND_Y; // Snap to ground level
-                     clippyVY = 0; // Stop vertical movement
-                     onPlatform = true; // Clippy is now considered on the ground platform
-                 }
+                // Check ground collision if not landing on a platform
+                if (clippyY <= GROUND_Y) {
+                    clippyY = GROUND_Y; // Snap to ground
+                    clippyVY = 0;
+                    onPlatform = true; // On the ground platform
+                } else {
+                    onPlatform = false; // In the air
+                }
             }
 
-             // Prevent Clippy from going through the ceiling (optional boundary)
+             // Ceiling check
              if (clippyY >= GAME_HEIGHT - CLIPPY_HEIGHT) {
-                 clippyY = GAME_HEIGHT - CLIPPY_HEIGHT; // Stop at ceiling
-                 clippyVY = 0; // Stop upward movement
+                 clippyY = GAME_HEIGHT - CLIPPY_HEIGHT;
+                 clippyVY = 0;
              }
 
-            // Update Clippy's visual position based on calculated clippyY
             clippy.style.bottom = `${clippyY}px`;
         }
 
 
-        /**
-         * Initiates Clippy's jump if currently on a platform.
-         */
         function jump() {
-            // Can only jump if on a platform (ground or obstacle) and the game is active
             if (onPlatform && gameActive) {
-                clippyVY = JUMP_FORCE; // Apply initial upward velocity
-                onPlatform = false; // Clippy is no longer on the platform after jumping
+                clippyVY = JUMP_FORCE;
+                onPlatform = false;
             }
         }
 
-        /**
-         * Creates a new obstacle DOM element with random height and adds it to the game area
-         * and the obstacles array.
-         */
         function spawnObstacle() {
-            if (!gameActive) return; // Don't spawn if game isn't running
-
-            // Define obstacle height constraints (in terms of tile height)
-            const minHeight = 30; // Min height = 1 tile
-            const maxHeight = 90; // Max height = 3 tiles
-            const tileHeight = 30; // Height of a single color tile in the logo
-            // Calculate a random number of tiles high within the constraints
+            if (!gameActive) return;
+            const minHeight = 30;
+            const maxHeight = 90;
+            const tileHeight = 30;
             const numTilesHigh = Math.floor(Math.random() * (maxHeight / tileHeight - minHeight / tileHeight + 1) + minHeight / tileHeight);
-            const height = numTilesHigh * tileHeight; // Calculate final obstacle height
+            const height = numTilesHigh * tileHeight;
 
-            // Create the main obstacle container div
             const obstacleElement = document.createElement('div');
             obstacleElement.classList.add('obstacle');
-            obstacleElement.style.height = `${height}px`; // Set calculated height
-            obstacleElement.style.left = `${GAME_WIDTH}px`; // Start off-screen right
-            // Adjust grid rows based on calculated height for the logo tiles
+            obstacleElement.style.height = `${height}px`;
+            obstacleElement.style.left = `${GAME_WIDTH}px`;
             obstacleElement.style.gridTemplateRows = `repeat(${numTilesHigh}, 1fr)`;
 
-             // Add the colored tiles (2 columns wide) to create the logo pattern
-             const colors = ['red', 'green', 'blue', 'yellow']; // MS logo colors
+             const colors = ['red', 'green', 'blue', 'yellow'];
              for(let r = 0; r < numTilesHigh; r++) {
                  for (let c = 0; c < 2; c++) {
                      const tile = document.createElement('div');
                      tile.classList.add('obstacle-tile');
-                     // Cycle through the colors based on row and column index
                      const colorIndex = (r * 2 + c) % 4;
                      tile.classList.add(`obstacle-tile-${colors[colorIndex]}`);
-                     obstacleElement.appendChild(tile); // Add tile to the obstacle container
+                     obstacleElement.appendChild(tile);
                  }
              }
 
-            // Add the fully created obstacle element to the game container in the DOM
             gameContainer.appendChild(obstacleElement);
-            // Add obstacle data to the tracking array for physics and collision checks
             obstacles.push({
-                element: obstacleElement, // Reference to the DOM element
-                x: GAME_WIDTH, // Initial horizontal position (off-screen right)
-                y: GROUND_Y, // Bottom edge Y position (aligned with ground)
-                width: 60, // Width defined in CSS
-                height: height // Calculated height
+                element: obstacleElement,
+                x: GAME_WIDTH,
+                y: GROUND_Y,
+                width: 60,
+                height: height
             });
+
+            // --- Set time for the NEXT obstacle spawn ---
+            setNextObstacleSpawnTime();
         }
 
-        /**
-         * Creates a new letter DOM element for the next required letter and adds it to the game area
-         * and the letters array.
-         */
         function spawnLetter() {
-            // Don't spawn if game isn't running or all letters have been collected
             if (!gameActive || nextLetterIndex >= TARGET_WORD.length) return;
 
-            // Get the character for the next required letter
             const letterChar = TARGET_WORD[nextLetterIndex];
-            // Create the letter div element
             const letterElement = document.createElement('div');
             letterElement.classList.add('letter');
-            letterElement.textContent = letterChar; // Set the text content
+            letterElement.textContent = letterChar;
 
-            // Calculate a random vertical position within the defined range
             const letterY = Math.random() * (LETTER_MAX_Y - LETTER_MIN_Y) + LETTER_MIN_Y;
-            letterElement.style.bottom = `${letterY}px`; // Set position from bottom
-            letterElement.style.left = `${GAME_WIDTH}px`; // Start off-screen right
+            letterElement.style.bottom = `${letterY}px`;
+            letterElement.style.left = `${GAME_WIDTH}px`;
 
-            // Add the letter element to the game container in the DOM
             gameContainer.appendChild(letterElement);
-            // Add letter data to the tracking array
             const newLetter = {
-                element: letterElement, // Reference to the DOM element
-                x: GAME_WIDTH, // Initial horizontal position
-                y: letterY, // Bottom edge Y position
-                width: 30, // Width from CSS
-                height: 30, // Height from CSS
-                char: letterChar // Store the character this element represents
+                element: letterElement,
+                x: GAME_WIDTH,
+                y: letterY,
+                width: 30,
+                height: 30,
+                char: letterChar
             };
             letters.push(newLetter);
         }
 
 
         /**
-         * Updates positions of obstacles and letters, checks for collisions,
-         * removes off-screen elements.
+         * Updates element positions, checks side collisions, handles letter collection.
          */
         function updateElements() {
-            if (!gameActive) return; // Don't update if game is paused or over
+            if (!gameActive) return;
 
             // --- Update Obstacles ---
-            // Iterate backwards to allow safe removal while iterating
             for (let i = obstacles.length - 1; i >= 0; i--) {
                 const obs = obstacles[i];
-                // Move obstacle leftwards based on scroll speed
                 obs.x -= SCROLL_SPEED;
-                obs.element.style.left = `${obs.x}px`; // Update visual position
+                obs.element.style.left = `${obs.x}px`;
 
-                // Check for side collision *only* if Clippy is currently in the air
-                if (!onPlatform) {
-                    const obsTopY = obs.y + obs.height; // Top Y coordinate of the obstacle
-                    // Check for horizontal overlap between Clippy and obstacle
-                    const isHorizontallyAligned =
-                            CLIPPY_X_POS < obs.x + obs.width - 5 && // Clippy left < Obs right (- buffer)
-                            CLIPPY_X_POS + CLIPPY_WIDTH > obs.x + 5; // Clippy right > Obs left (+ buffer)
+                // --- Refined Side Collision Check ---
+                // Only check if Clippy is roughly vertically aligned and horizontally overlapping
+                const obsTopY = obs.y + obs.height;
+                const isHorizontallyAligned =
+                        CLIPPY_X_POS + CLIPPY_WIDTH > obs.x + 5 && // Clippy right edge past obstacle left edge (+ buffer)
+                        CLIPPY_X_POS < obs.x + obs.width - 5;   // Clippy left edge before obstacle right edge (- buffer)
 
-                    if (isHorizontallyAligned) {
-                         const clippyBottom = clippyY; // Clippy's bottom Y
-                         const clippyTop = clippyY + CLIPPY_HEIGHT; // Clippy's top Y
+                if (isHorizontallyAligned) {
+                    const clippyBottom = clippyY;
+                    const clippyTop = clippyY + CLIPPY_HEIGHT;
 
-                         // Check for vertical overlap indicating a potential side hit
-                         // Ensure Clippy's bottom is below obstacle top AND Clippy's top is above obstacle bottom
-                         if (clippyBottom < obsTopY - 5 && clippyTop > obs.y + 5) { // Add buffer for feel
-                               gameOver(`hit the side of an obstacle`); // Trigger game over
-                               return; // Stop further updates this frame
-                         }
+                    // Check for vertical overlap (Clippy top above obs bottom AND Clippy bottom below obs top)
+                    // Added buffer (e.g., 5px) to avoid triggering on exact pixel alignment with top/bottom, giving landing priority
+                    if (clippyTop > obs.y + 5 && clippyBottom < obsTopY - 5) {
+                         // This indicates a definite side collision, not a landing/grazing touch
+                         gameOver(`hit the side of an obstacle`);
+                         return;
                     }
                 }
 
-                // Remove obstacle if it has moved completely off-screen to the left
+                // Remove if off-screen left
                 if (obs.x + obs.width < 0) {
-                    obs.element.remove(); // Remove from DOM
-                    obstacles.splice(i, 1); // Remove from tracking array
+                    obs.element.remove();
+                    obstacles.splice(i, 1);
                 }
             }
 
              // --- Update Letters ---
-             // Iterate backwards for safe removal
             for (let i = letters.length - 1; i >= 0; i--) {
                 const letter = letters[i];
-                // Move letter leftwards
                 letter.x -= SCROLL_SPEED;
-                letter.element.style.left = `${letter.x}px`; // Update visual position
+                letter.element.style.left = `${letter.x}px`;
 
-                // Check for collision ONLY if this letter is the next one needed in the sequence
+                // Collision check ONLY for the NEXT required letter
                 if (letter.char === TARGET_WORD[nextLetterIndex] && checkLetterCollision(letter)) {
-                    playPlopSound(); // Play collection sound
-                    collectedString += letter.char; // Add letter to collected string
-                    uiCollected.textContent = collectedString; // Update collected letters display
+                    playPlopSound();
+                    collectedString += letter.char;
+                    uiCollected.textContent = collectedString;
 
-                    letter.element.remove(); // Remove from DOM
-                    letters.splice(i, 1); // Remove from tracking array
-                    nextLetterIndex++; // Advance to the next required letter index
+                    letter.element.remove();
+                    letters.splice(i, 1);
+                    nextLetterIndex++;
 
-                    // Update UI to show the *next* needed letter (or indicate completion)
                     if (nextLetterIndex < TARGET_WORD.length) {
                         uiNextLetter.textContent = TARGET_WORD[nextLetterIndex];
                     } else {
-                        uiNextLetter.textContent = "-"; // All letters collected
+                        uiNextLetter.textContent = "-";
                     }
 
-                    // Check if all letters have been collected (win condition)
                     if (nextLetterIndex === TARGET_WORD.length) {
-                        winGame(); // Trigger win sequence
-                        return; // Stop further updates this frame
+                        winGame();
+                        return;
                     }
                 }
-                // Remove letter if it has moved completely off-screen to the left
+                // Remove if off-screen left
                 else if (letter.x + letter.width < 0) {
-                    letter.element.remove(); // Remove from DOM
-                    letters.splice(i, 1); // Remove from tracking array
+                    letter.element.remove();
+                    letters.splice(i, 1);
                 }
             }
         }
 
-        /**
-         * Checks for collision between Clippy and a letter using AABB.
-         * @param {object} letter - The letter object with position and dimensions.
-         * @returns {boolean} True if colliding, false otherwise.
-         */
         function checkLetterCollision(letter) {
-            // Calculate Clippy's current bounding box edges
             const plTop = clippyY + CLIPPY_HEIGHT;
             const plBottom = clippyY;
             const plLeft = CLIPPY_X_POS;
             const plRight = CLIPPY_X_POS + CLIPPY_WIDTH;
 
-            // Calculate letter's current bounding box edges
             const elTop = letter.y + letter.height;
             const elBottom = letter.y;
             const elLeft = letter.x;
             const elRight = letter.x + letter.width;
 
-            // Standard Axis-Aligned Bounding Box (AABB) overlap check
-            // Return true if all overlap conditions are met
             return (
                 plLeft < elRight &&
                 plRight > elLeft &&
@@ -604,112 +530,92 @@
             );
         }
 
-        /**
-         * Ends the game, stops the loop, and displays the win message.
-         */
-        function winGame() {
-            if (!gameActive) return; // Prevent multiple calls
-            console.log("You Win!");
-            gameActive = false; // Set game state to inactive
-            cancelAnimationFrame(animationFrameId); // Stop the game loop
-            animationFrameId = null; // Clear the loop ID
 
-            // Display the win message overlay
+        function winGame() {
+            if (!gameActive) return;
+            console.log("You Win!");
+            gameActive = false;
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+
             messageOverlay.innerHTML = `
                 <h2>You Collected THRIVING!</h2>
                 <p>Great Job!</p>
                 <p>Click or press Spacebar to Play Again</p>
             `;
-            messageOverlay.style.display = 'flex'; // Show the overlay
+            messageOverlay.style.display = 'flex';
         }
 
 
         // --- Game Loop ---
-        /**
-         * The main recursive function driving the game's animation and logic updates.
-         */
         function gameLoop() {
-            // Stop the loop if the game is no longer active
             if (!gameActive) {
-                 animationFrameId = null; // Ensure ID is cleared
+                 animationFrameId = null;
                  return;
             }
 
-            frameCount++; // Increment frame counter for timing spawns
+            frameCount++;
 
-            applyGravityAndPlatformCheck(); // Update Clippy's physics and position
-            updateElements(); // Update obstacles and letters, check collisions
+            applyGravityAndPlatformCheck(); // Handles physics and landing
+            updateElements(); // Handles movement and collisions (side hits, letters)
 
-            // Spawn new obstacles periodically based on frame count interval
-            if (frameCount % OBSTACLE_SPAWN_INTERVAL === 0) {
-                spawnObstacle();
+            // Spawn new obstacles based on randomized timer
+            if (frameCount >= nextObstacleSpawnFrame) {
+                spawnObstacle(); // This function now also sets the *next* spawn time
             }
 
-             // Attempt to spawn the next required letter periodically, checking spacing
+             // Spawn next required letter periodically, checking spacing
              if (nextLetterIndex < TARGET_WORD.length && frameCount % LETTER_SPAWN_INTERVAL === 0) {
-                  let lastElementX = 0; // Find the rightmost edge of the last spawned element
-                  // Check last obstacle's position
+                  let lastElementX = 0;
                   if (obstacles.length > 0) {
                       const lastObs = obstacles[obstacles.length - 1];
                       lastElementX = Math.max(lastElementX, lastObs.x + lastObs.width);
                   }
-                  // Check last letter's position
                   if (letters.length > 0) {
                       const lastLetter = letters[letters.length - 1];
                       lastElementX = Math.max(lastElementX, lastLetter.x + lastLetter.width);
                   }
 
-                  // Only spawn if the last element is far enough left to prevent overlap
                   if (lastElementX < GAME_WIDTH - MIN_SPAWN_GAP) {
-                       spawnLetter(); // Spawn the letter if gap is sufficient
+                       spawnLetter();
                   }
              }
 
-            // Request the next animation frame, continuing the loop
             animationFrameId = requestAnimationFrame(gameLoop);
         }
 
         // --- Event Listeners ---
-        let initialInteraction = false; // Flag to ensure audio context starts only once
-        /**
-         * Handles user interaction (click or spacebar) to start audio,
-         * start/restart the game, or trigger a jump.
-         */
+        let initialInteraction = false;
         async function handleInteraction() {
-             // Start audio context on the very first interaction
              if (!initialInteraction) {
                  await startAudio();
                  initialInteraction = true;
              }
-             // If game is not active (overlay showing), start/restart the game
              if (!gameActive && messageOverlay.style.display !== 'none') {
                   startGame();
              }
-             // If game is active, trigger a jump
              else if (gameActive) {
                   jump();
              }
         }
 
-        // Listen for Spacebar keydown events
         document.addEventListener('keydown', (e) => {
             if (e.code === 'Space') {
-                e.preventDefault(); // Prevent default browser scroll behavior
-                handleInteraction(); // Handle game start or jump
+                e.preventDefault();
+                handleInteraction();
             }
         });
 
-        // Listen for clicks on the message overlay (for starting/restarting)
         messageOverlay.addEventListener('click', () => {
-             handleInteraction(); // Handle game start
+             handleInteraction();
         });
 
         // --- Initial Setup ---
-        // Ensure overlay is visible and Clippy is positioned correctly on load
         messageOverlay.style.display = 'flex';
         clippy.style.bottom = `${GROUND_Y}px`;
-        // Display the first letter needed in the UI
         uiNextLetter.textContent = TARGET_WORD[0];
+        // Set the very first obstacle spawn time
+        setNextObstacleSpawnTime(); // Calculate when the first obstacle should appear
         console.log("Game ready. Press Space or click overlay to start.");
 
 
